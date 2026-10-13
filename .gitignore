@@ -1,0 +1,37 @@
+# Gradle and Kotlin generated files
+.gradle/
+.kotlin/
+**/build/
+.bootstrap/
+
+# Local SDK configuration and signing material
+local.properties
+*.jks
+*.keystore
+.env
+.env.*
+!.env.example
+credentials*.json
+secrets*.json
+
+# IDE and editor state
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+*.code-workspace
+
+# OS and temporary files
+.DS_Store
+Thumbs.db
+*.log
+*.apk
+*.aab
+
+# Downloader-generated and temporary media
+downloads/
+*.part
+*.ytdl
