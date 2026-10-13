@@ -1,7 +1,13 @@
 package com.preload.app
 
+import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -48,10 +54,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 
@@ -76,6 +84,7 @@ class MainActivity : ComponentActivity() {
                     onAnalyze = analyzer::analyze,
                     onDownload = downloader::download,
                     onCancelDownload = downloader::cancel,
+                    onOpenDownload = ::openDownloadedFile,
                 )
             }
         }
@@ -94,6 +103,18 @@ class MainActivity : ComponentActivity() {
         url = URL_PATTERN.find(sharedText)?.value ?: sharedText
     }
 
+    private fun openDownloadedFile(file: DownloadedFile): Boolean = try {
+        startActivity(
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(file.contentUri, file.mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            },
+        )
+        true
+    } catch (_: ActivityNotFoundException) {
+        false
+    }
+
     private companion object {
         val URL_PATTERN = Regex("https?://\\S+", RegexOption.IGNORE_CASE)
     }
@@ -106,12 +127,14 @@ private fun PreloadScreen(
     onAnalyze: suspend (String) -> AnalyzedVideo,
     onDownload: suspend (String, String, SelectableFormat, (Float) -> Unit) -> DownloadedFile,
     onCancelDownload: () -> Boolean,
+    onOpenDownload: (DownloadedFile) -> Boolean,
 ) {
     var isLoading by remember { mutableStateOf(false) }
     var analyzedVideo by remember { mutableStateOf<AnalyzedVideo?>(null) }
     var selectedFormatId by remember { mutableStateOf<String?>(null) }
     var downloadState by remember { mutableStateOf<DownloadUiState>(DownloadUiState.Idle) }
     val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val analysisFailedMessage = stringResource(R.string.analysis_failed)
@@ -121,6 +144,56 @@ private fun PreloadScreen(
     val audioOnlyMessage = stringResource(R.string.audio_only_unavailable)
     val cancelFailedMessage = stringResource(R.string.cancel_failed)
     val downloadCanceledMessage = stringResource(R.string.download_canceled)
+    val downloadPublishFailedMessage = stringResource(R.string.download_publish_failed)
+    val storagePermissionDeniedMessage = stringResource(R.string.storage_permission_denied)
+    val openFailedMessage = stringResource(R.string.open_failed)
+    var pendingLegacyDownload by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    val startDownload: (SelectableFormat) -> Unit = { selectedFormat ->
+        coroutineScope.launch {
+            downloadState = DownloadUiState.Downloading(null)
+            try {
+                val video = analyzedVideo ?: return@launch
+                val result = onDownload(
+                    video.webpageUrl ?: url.trim(),
+                    video.title,
+                    selectedFormat,
+                ) { progress ->
+                    coroutineScope.launch {
+                        downloadState = DownloadUiState.Downloading(
+                            progress.toInt().coerceIn(0, 100),
+                        )
+                    }
+                }
+                downloadState = DownloadUiState.Complete(result)
+                snackbarHostState.showSnackbar(downloadCompleteMessage)
+            } catch (_: DownloadCanceledException) {
+                downloadState = DownloadUiState.Idle
+                snackbarHostState.showSnackbar(downloadCanceledMessage)
+            } catch (_: DownloadPublishException) {
+                downloadState = DownloadUiState.Failed(downloadPublishFailedMessage)
+                snackbarHostState.showSnackbar(downloadPublishFailedMessage)
+            } catch (error: Throwable) {
+                val detail = error.safeMessage()
+                downloadState = DownloadUiState.Failed(detail)
+                snackbarHostState.showSnackbar(
+                    if (detail == null) downloadFailedMessage
+                    else "$downloadFailedMessage: $detail",
+                )
+            }
+        }
+    }
+    val storagePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val pending = pendingLegacyDownload
+        pendingLegacyDownload = null
+        if (granted) {
+            pending?.invoke()
+        } else {
+            coroutineScope.launch { snackbarHostState.showSnackbar(storagePermissionDeniedMessage) }
+        }
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -225,43 +298,22 @@ private fun PreloadScreen(
                             downloadState = DownloadUiState.Idle
                         },
                         onDownload = { selectedFormat ->
-                            coroutineScope.launch {
-                                when {
-                                    selectedFormat.hasVideo && !selectedFormat.hasAudio -> {
-                                        snackbarHostState.showSnackbar(videoOnlyMessage)
-                                    }
-                                    !selectedFormat.hasVideo && selectedFormat.hasAudio -> {
-                                        snackbarHostState.showSnackbar(audioOnlyMessage)
-                                    }
-                                    else -> {
-                                        downloadState = DownloadUiState.Downloading(null)
-                                        try {
-                                            val result = onDownload(
-                                                video.webpageUrl ?: url.trim(),
-                                                video.title,
-                                                selectedFormat,
-                                            ) { progress ->
-                                                coroutineScope.launch {
-                                                    downloadState = DownloadUiState.Downloading(
-                                                        progress.toInt().coerceIn(0, 100),
-                                                    )
-                                                }
-                                            }
-                                            downloadState = DownloadUiState.Complete(result)
-                                            snackbarHostState.showSnackbar(downloadCompleteMessage)
-                                        } catch (_: DownloadCanceledException) {
-                                            downloadState = DownloadUiState.Idle
-                                            snackbarHostState.showSnackbar(downloadCanceledMessage)
-                                        } catch (error: Throwable) {
-                                            val detail = error.safeMessage()
-                                            downloadState = DownloadUiState.Failed(detail)
-                                            snackbarHostState.showSnackbar(
-                                                if (detail == null) downloadFailedMessage
-                                                else "$downloadFailedMessage: $detail",
-                                            )
-                                        }
-                                    }
+                            when {
+                                selectedFormat.hasVideo && !selectedFormat.hasAudio -> {
+                                    coroutineScope.launch { snackbarHostState.showSnackbar(videoOnlyMessage) }
                                 }
+                                !selectedFormat.hasVideo && selectedFormat.hasAudio -> {
+                                    coroutineScope.launch { snackbarHostState.showSnackbar(audioOnlyMessage) }
+                                }
+                                Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+                                    ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                                    ) != PackageManager.PERMISSION_GRANTED -> {
+                                    pendingLegacyDownload = { startDownload(selectedFormat) }
+                                    storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                                }
+                                else -> startDownload(selectedFormat)
                             }
                         },
                         onCancel = {
@@ -269,6 +321,11 @@ private fun PreloadScreen(
                                 coroutineScope.launch {
                                     snackbarHostState.showSnackbar(cancelFailedMessage)
                                 }
+                            }
+                        },
+                        onOpen = { file ->
+                            if (!onOpenDownload(file)) {
+                                coroutineScope.launch { snackbarHostState.showSnackbar(openFailedMessage) }
                             }
                         },
                     )
@@ -332,6 +389,7 @@ private fun FormatSelectionSection(
     onFormatSelected: (String) -> Unit,
     onDownload: (SelectableFormat) -> Unit,
     onCancel: () -> Unit,
+    onOpen: (DownloadedFile) -> Unit,
 ) {
     val videoFormats = formats.filter { it.hasVideo }
     val audioFormats = formats.filter { !it.hasVideo && it.hasAudio }
@@ -418,6 +476,17 @@ private fun FormatSelectionSection(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Text(
+                    text = stringResource(R.string.saved_to_downloads),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(
+                    onClick = { onOpen(downloadState.file) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.open))
+                }
             }
             is DownloadUiState.Failed -> {
                 Text(

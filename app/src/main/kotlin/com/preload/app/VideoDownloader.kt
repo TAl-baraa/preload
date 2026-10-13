@@ -1,6 +1,7 @@
 package com.preload.app
 
 import android.content.Context
+import android.net.Uri
 import android.os.Environment
 import android.util.Log
 import com.yausername.youtubedl_android.YoutubeDL
@@ -14,13 +15,18 @@ import java.util.UUID
 data class DownloadedFile(
     val fileName: String,
     val sizeBytes: Long,
-    val absolutePath: String,
+    val contentUri: Uri,
+    val mimeType: String,
+    val destinationLabel: String,
 )
 
 class DownloadCanceledException : Exception()
+class DownloadPublishException(cause: Throwable) :
+    IOException("Downloaded, but could not save to Downloads", cause)
 
 class VideoDownloader(context: Context) {
     private val appContext = context.applicationContext
+    private val publisher = MediaStorePublisher(appContext)
     private val processLock = Any()
 
     @Volatile
@@ -88,11 +94,25 @@ class VideoDownloader(context: Context) {
             if (resultFile.length() <= 0L) {
                 throw IOException("The downloaded file is empty")
             }
+            val sourceSize = resultFile.length()
+            Log.i(TAG, "Download source: ${resultFile.absolutePath}")
+            Log.i(TAG, "Download source size: $sourceSize bytes")
+
+            val published = try {
+                publisher.publish(resultFile)
+            } catch (error: Throwable) {
+                Log.e(TAG, "Downloaded source preserved after publish failure: ${resultFile.absolutePath}", error)
+                throw DownloadPublishException(error)
+            }
+            val sourceDeleted = resultFile.delete()
+            Log.i(TAG, "Source cleanup result for ${resultFile.absolutePath}: $sourceDeleted")
 
             DownloadedFile(
-                fileName = resultFile.name,
-                sizeBytes = resultFile.length(),
-                absolutePath = resultFile.absolutePath,
+                fileName = published.displayName,
+                sizeBytes = published.sizeBytes,
+                contentUri = published.contentUri,
+                mimeType = published.mimeType,
+                destinationLabel = published.destinationLabel,
             )
         } catch (error: YoutubeDL.CanceledException) {
             throw DownloadCanceledException()
