@@ -141,7 +141,6 @@ private fun PreloadScreen(
     val downloadFailedMessage = stringResource(R.string.download_failed)
     val downloadCompleteMessage = stringResource(R.string.download_complete)
     val videoOnlyMessage = stringResource(R.string.video_only_unavailable)
-    val audioOnlyMessage = stringResource(R.string.audio_only_unavailable)
     val cancelFailedMessage = stringResource(R.string.cancel_failed)
     val downloadCanceledMessage = stringResource(R.string.download_canceled)
     val downloadPublishFailedMessage = stringResource(R.string.download_publish_failed)
@@ -301,9 +300,6 @@ private fun PreloadScreen(
                             when {
                                 selectedFormat.hasVideo && !selectedFormat.hasAudio -> {
                                     coroutineScope.launch { snackbarHostState.showSnackbar(videoOnlyMessage) }
-                                }
-                                !selectedFormat.hasVideo && selectedFormat.hasAudio -> {
-                                    coroutineScope.launch { snackbarHostState.showSnackbar(audioOnlyMessage) }
                                 }
                                 Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
                                     ContextCompat.checkSelfPermission(

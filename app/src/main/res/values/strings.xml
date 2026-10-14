@@ -37,7 +37,6 @@
     <string name="cancel">Cancel</string>
     <string name="cancel_failed">Could not cancel the download</string>
     <string name="video_only_unavailable">This quality requires audio merging, which is not available yet.</string>
-    <string name="audio_only_unavailable">Audio downloads will be enabled in a later step.</string>
     <string name="supported_sites_message">Paste a link from YouTube, Instagram, Facebook, TikTok or another supported site.</string>
     <string name="privacy_message">No ads. No tracking.</string>
 </resources>

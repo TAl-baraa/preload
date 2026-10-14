@@ -140,7 +140,7 @@ class VideoAnalyzer(context: Context) {
             initializationFailure?.let { throw IllegalStateException("yt-dlp initialization failed", it) }
 
             try {
-                YoutubeDL.getInstance().init(appContext)
+                YtDlpRuntime.ensureReady(appContext)
                 initialized = true
             } catch (error: Throwable) {
                 initializationFailure = error

@@ -25,9 +25,9 @@ class MediaStorePublisher(context: Context) {
     private val appContext = context.applicationContext
     private val resolver = appContext.contentResolver
 
-    suspend fun publish(source: File): PublishedMedia {
+    suspend fun publish(source: File, hasVideo: Boolean): PublishedMedia {
         require(source.isFile && source.length() > 0L) { "Source media file is missing or empty" }
-        val mimeType = mimeTypeFor(source.name)
+        val mimeType = mimeTypeFor(source.name, hasVideo)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             publishModern(source, mimeType)
         } else {
@@ -140,14 +140,16 @@ class MediaStorePublisher(context: Context) {
             }
         }
 
-    private fun mimeTypeFor(fileName: String): String = when (fileName.substringAfterLast('.', "").lowercase()) {
-        "mp4" -> "video/mp4"
-        "webm" -> "video/webm"
-        "mkv" -> "video/x-matroska"
-        "m4a" -> "audio/mp4"
-        "mp3" -> "audio/mpeg"
-        else -> "application/octet-stream"
-    }
+    private fun mimeTypeFor(fileName: String, hasVideo: Boolean): String =
+        when (fileName.substringAfterLast('.', "").lowercase()) {
+            "mp4" -> if (hasVideo) "video/mp4" else "audio/mp4"
+            "webm" -> if (hasVideo) "video/webm" else "audio/webm"
+            "mkv" -> "video/x-matroska"
+            "m4a" -> "audio/mp4"
+            "mp3" -> "audio/mpeg"
+            "opus", "ogg", "oga" -> "audio/ogg"
+            else -> "application/octet-stream"
+        }
 
     private companion object {
         const val TAG = "PreloadPublisher"
