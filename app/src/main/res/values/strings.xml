@@ -25,6 +25,8 @@
     <string name="download">Download</string>
     <string name="downloading">Downloading…</string>
     <string name="downloading_percent">Downloading… %1$d%%</string>
+    <string name="download_size_progress">%1$s / %2$s</string>
+    <string name="download_eta_remaining">%1$s remaining</string>
     <string name="download_complete">Download complete</string>
     <string name="saved_to_downloads">Saved to Downloads/Preload</string>
     <string name="open">Open</string>

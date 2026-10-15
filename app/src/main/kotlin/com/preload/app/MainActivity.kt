@@ -125,7 +125,7 @@ private fun PreloadScreen(
     url: String,
     onUrlChange: (String) -> Unit,
     onAnalyze: suspend (String) -> AnalyzedVideo,
-    onDownload: suspend (String, String, SelectableFormat, (Float) -> Unit) -> DownloadedFile,
+    onDownload: suspend (String, String, SelectableFormat, (DownloadProgress) -> Unit) -> DownloadedFile,
     onCancelDownload: () -> Boolean,
     onOpenDownload: (DownloadedFile) -> Boolean,
 ) {
@@ -133,6 +133,7 @@ private fun PreloadScreen(
     var analyzedVideo by remember { mutableStateOf<AnalyzedVideo?>(null) }
     var selectedFormatId by remember { mutableStateOf<String?>(null) }
     var downloadState by remember { mutableStateOf<DownloadUiState>(DownloadUiState.Idle) }
+    var downloadGeneration by remember { mutableStateOf(0L) }
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -150,7 +151,8 @@ private fun PreloadScreen(
 
     val startDownload: (SelectableFormat) -> Unit = { selectedFormat ->
         coroutineScope.launch {
-            downloadState = DownloadUiState.Downloading(null)
+            val generation = ++downloadGeneration
+            downloadState = DownloadUiState.Downloading(DownloadProgress())
             try {
                 val video = analyzedVideo ?: return@launch
                 val result = onDownload(
@@ -159,14 +161,16 @@ private fun PreloadScreen(
                     selectedFormat,
                 ) { progress ->
                     coroutineScope.launch {
-                        downloadState = DownloadUiState.Downloading(
-                            progress.toInt().coerceIn(0, 100),
-                        )
+                        if (downloadGeneration == generation && downloadState is DownloadUiState.Downloading) {
+                            downloadState = DownloadUiState.Downloading(progress)
+                        }
                     }
                 }
+                if (downloadGeneration == generation) downloadGeneration++
                 downloadState = DownloadUiState.Complete(result)
                 snackbarHostState.showSnackbar(downloadCompleteMessage)
             } catch (_: DownloadCanceledException) {
+                if (downloadGeneration == generation) downloadGeneration++
                 downloadState = DownloadUiState.Idle
                 snackbarHostState.showSnackbar(downloadCanceledMessage)
             } catch (_: DownloadPublishException) {
@@ -436,13 +440,37 @@ private fun FormatSelectionSection(
 
         when (downloadState) {
             is DownloadUiState.Downloading -> {
+                val progress = downloadState.progress
                 Text(
-                    text = downloadState.percent?.let {
-                        stringResource(R.string.downloading_percent, it)
+                    text = progress.percent?.let {
+                        stringResource(R.string.downloading_percent, it.toInt().coerceIn(0, 100))
                     } ?: stringResource(R.string.downloading),
                     style = MaterialTheme.typography.titleSmall,
                 )
-                downloadState.percent?.let { percent ->
+                if (progress.downloadedBytes != null && progress.totalBytes != null) {
+                    Text(
+                        text = stringResource(
+                            R.string.download_size_progress,
+                            formatProgressBytes(progress.downloadedBytes, progress.sizeUsesBinaryUnits),
+                            formatProgressBytes(progress.totalBytes, progress.sizeUsesBinaryUnits),
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                val speed = progress.bytesPerSecond?.let {
+                    "${formatProgressBytes(it, progress.speedUsesBinaryUnits)}/s"
+                }
+                val eta = progress.etaSeconds?.let {
+                    stringResource(R.string.download_eta_remaining, formatEta(it))
+                }
+                listOfNotNull(speed, eta).takeIf { it.isNotEmpty() }?.let { details ->
+                    Text(
+                        text = details.joinToString(" • "),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                progress.percent?.let { percent ->
                     LinearProgressIndicator(
                         progress = { percent / 100f },
                         modifier = Modifier.fillMaxWidth(),
@@ -609,7 +637,7 @@ private fun Throwable.safeMessage(): String? = message
 
 private sealed interface DownloadUiState {
     data object Idle : DownloadUiState
-    data class Downloading(val percent: Int?) : DownloadUiState
+    data class Downloading(val progress: DownloadProgress) : DownloadUiState
     data class Complete(val file: DownloadedFile) : DownloadUiState
     data class Failed(val detail: String?) : DownloadUiState
 }

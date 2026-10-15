@@ -46,7 +46,7 @@ class VideoDownloader(context: Context) {
         url: String,
         title: String,
         format: SelectableFormat,
-        onProgress: (Float) -> Unit,
+        onProgress: (DownloadProgress) -> Unit,
     ): DownloadedFile = withContext(Dispatchers.IO) {
         require(format.hasAudio) {
             "Only formats containing audio can be downloaded"
@@ -82,8 +82,9 @@ class VideoDownloader(context: Context) {
                 val response = YoutubeDL.getInstance().execute(
                     request,
                     processId,
-                ) { progress, _, _ ->
-                    onProgress(progress.coerceIn(0f, 100f))
+                ) { progress, etaSeconds, line ->
+                    Log.d(TAG, "yt-dlp progress: $line")
+                    DownloadProgressParser.parse(progress, etaSeconds, line)?.let(onProgress)
                 }
                 if (response.exitCode != 0) {
                     Log.e(TAG, "yt-dlp failed (${response.exitCode}): ${response.err}")
