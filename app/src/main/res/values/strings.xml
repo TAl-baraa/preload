@@ -3,6 +3,7 @@
     <string name="app_description">Video downloader</string>
     <string name="url_placeholder">Paste video link</string>
     <string name="clear_url">Clear video link</string>
+    <string name="clear">Clear</string>
     <string name="paste">Paste</string>
     <string name="analyze">Analyze</string>
     <string name="analyzing">Analyzing link…</string>
@@ -17,12 +18,14 @@
     <string name="video_thumbnail">Video thumbnail</string>
     <string name="untitled_video">Untitled video</string>
     <string name="video_quality">Video quality</string>
+    <string name="quality">Quality</string>
     <string name="video_format">Video format</string>
     <string name="no_video_formats">No video formats were found for this link.</string>
     <string name="audio">Audio</string>
     <string name="best_audio">Best audio</string>
     <string name="video_and_audio">Video + Audio</string>
     <string name="video_only_unavailable_short">Video only • Requires audio merging</string>
+    <string name="requires_merging">Requires merging</string>
     <string name="audio_only">Audio only</string>
     <string name="audio_bitrate">Audio only • %1$d kbps</string>
     <string name="approximate_size">Approx. %1$s</string>

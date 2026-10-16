@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -16,6 +17,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,14 +32,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -46,9 +49,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,7 +66,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import androidx.core.content.ContextCompat
@@ -80,7 +87,6 @@ class MainActivity : AppCompatActivity() {
         handleShareIntent(intent)
         lifecycleScope.launch { analyzer.initialize() }
         lifecycleScope.launch { downloader.initialize() }
-        enableEdgeToEdge()
         setContent {
             val themePreference by appPreferences.theme.collectAsState(ThemePreference.System)
             val useDarkTheme = when (themePreference) {
@@ -89,9 +95,22 @@ class MainActivity : AppCompatActivity() {
                 ThemePreference.Dark -> true
             }
 
-            MaterialTheme(
-                colorScheme = if (useDarkTheme) darkColorScheme() else lightColorScheme(),
-            ) {
+            SideEffect {
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(
+                        lightScrim = android.graphics.Color.TRANSPARENT,
+                        darkScrim = android.graphics.Color.TRANSPARENT,
+                        detectDarkMode = { useDarkTheme },
+                    ),
+                    navigationBarStyle = SystemBarStyle.auto(
+                        lightScrim = 0xFFF0F4F8.toInt(),
+                        darkScrim = 0xFF171E28.toInt(),
+                        detectDarkMode = { useDarkTheme },
+                    ),
+                )
+            }
+
+            PreloadTheme(darkTheme = useDarkTheme) {
                 PreloadAppShell(
                     themePreference = themePreference,
                     onThemePreferenceChanged = { preference ->
@@ -202,12 +221,9 @@ private fun PreloadScreen(
                 downloadState = DownloadUiState.Failed(downloadPublishFailedMessage)
                 snackbarHostState.showSnackbar(downloadPublishFailedMessage)
             } catch (error: Throwable) {
-                val detail = error.safeMessage()
-                downloadState = DownloadUiState.Failed(detail)
-                snackbarHostState.showSnackbar(
-                    if (detail == null) downloadFailedMessage
-                    else "$downloadFailedMessage: $detail",
-                )
+                Log.e(DOWNLOAD_TAG, "Download failed", error)
+                downloadState = DownloadUiState.Failed(null)
+                snackbarHostState.showSnackbar(downloadFailedMessage)
             }
         }
     }
@@ -237,12 +253,12 @@ private fun PreloadScreen(
                 style = MaterialTheme.typography.headlineMedium,
             )
             Text(
-                text = stringResource(R.string.app_description),
-                style = MaterialTheme.typography.bodyMedium,
+                text = stringResource(R.string.privacy_message),
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Column(
                 modifier = Modifier
@@ -251,62 +267,91 @@ private fun PreloadScreen(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                OutlinedTextField(
-                    value = url,
-                    onValueChange = onUrlChange,
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    shape = RoundedCornerShape(24.dp),
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text(stringResource(R.string.url_placeholder)) },
-                    singleLine = true,
-                    trailingIcon = {
-                        if (url.isNotEmpty()) {
-                            IconButton(onClick = { onUrlChange("") }) {
-                                Icon(
-                                    imageVector = Icons.Default.Clear,
-                                    contentDescription = stringResource(R.string.clear_url),
-                                )
-                            }
-                        }
-                    },
-                )
-
-                OutlinedButton(
-                    onClick = {
-                        clipboardManager.getText()?.text?.let { pastedText ->
-                            onUrlChange(pastedText)
-                        }
-                    },
-                    modifier = Modifier.align(Alignment.End),
                 ) {
-                    Text(stringResource(R.string.paste))
-                }
-
-                Button(
-                    onClick = {
-                        coroutineScope.launch {
-                            isLoading = true
-                            analysisError = null
-                            analyzedVideo = null
-                            selectedFormatId = null
-                            downloadState = DownloadUiState.Idle
-                            try {
-                                val trimmedUrl = url.trim()
-                                if (!trimmedUrl.isLikelyWebUrl()) {
-                                    analysisError = AnalysisError.InvalidLink
-                                } else {
-                                    analyzedVideo = onAnalyze(trimmedUrl)
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        OutlinedTextField(
+                            value = url,
+                            onValueChange = onUrlChange,
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text(stringResource(R.string.url_placeholder)) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            textStyle = LocalTextStyle.current.copy(
+                                textAlign = TextAlign.Start,
+                                textDirection = TextDirection.Ltr,
+                            ),
+                            trailingIcon = {
+                                if (url.isNotEmpty()) {
+                                    IconButton(onClick = { onUrlChange("") }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Clear,
+                                            contentDescription = stringResource(R.string.clear_url),
+                                        )
+                                    }
                                 }
-                            } catch (error: Throwable) {
-                                Log.e(ANALYSIS_TAG, "Video analysis failed for ${url.trim()}", error)
-                                analysisError = error.toAnalysisError()
-                            } finally {
-                                isLoading = false
+                            },
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (url.isNotEmpty()) {
+                                TextButton(onClick = { onUrlChange("") }) {
+                                    Text(stringResource(R.string.clear))
+                                }
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    clipboardManager.getText()?.text?.let { pastedText ->
+                                        onUrlChange(pastedText)
+                                    }
+                                },
+                            ) {
+                                Text(stringResource(R.string.paste))
                             }
                         }
-                    },
-                    enabled = url.isNotEmpty() && !isLoading,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(R.string.analyze))
+
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    isLoading = true
+                                    analysisError = null
+                                    analyzedVideo = null
+                                    selectedFormatId = null
+                                    downloadState = DownloadUiState.Idle
+                                    try {
+                                        val trimmedUrl = url.trim()
+                                        if (!trimmedUrl.isLikelyWebUrl()) {
+                                            analysisError = AnalysisError.InvalidLink
+                                        } else {
+                                            analyzedVideo = onAnalyze(trimmedUrl)
+                                        }
+                                    } catch (error: Throwable) {
+                                        Log.e(ANALYSIS_TAG, "Video analysis failed for ${url.trim()}", error)
+                                        analysisError = error.toAnalysisError()
+                                    } finally {
+                                        isLoading = false
+                                    }
+                                }
+                            },
+                            enabled = url.isNotEmpty() && !isLoading,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        ) {
+                            Text(stringResource(R.string.analyze))
+                        }
+                    }
                 }
 
                 if (isLoading) {
@@ -379,14 +424,6 @@ private fun PreloadScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Text(
-                text = stringResource(R.string.privacy_message),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-            )
         }
     }
 }
@@ -399,18 +436,20 @@ private fun InitialStateCard() {
         ),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(
+        Row(
             modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(28.dp),
+            )
             Text(
                 text = stringResource(R.string.initial_state_title),
                 style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = stringResource(R.string.initial_state_support),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -446,65 +485,59 @@ private fun AnalyzedResultCard(
     onCancel: () -> Unit,
     onOpen: (DownloadedFile) -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column {
-            video.thumbnailUrl?.let { thumbnailUrl ->
-                AsyncImage(
-                    model = thumbnailUrl,
-                    contentDescription = stringResource(R.string.video_thumbnail),
-                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
-                    contentScale = ContentScale.Crop,
-                )
-            }
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = video.title.ifBlank { stringResource(R.string.untitled_video) },
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            video.uploader?.let {
                 Text(
-                    text = video.title.ifBlank { stringResource(R.string.untitled_video) },
-                    style = MaterialTheme.typography.titleLarge,
-                    maxLines = 3,
+                    text = it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                video.uploader?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                val details = listOfNotNull(
-                    video.durationSeconds?.let(::formatDuration),
-                    video.site?.takeIf { it.isNotBlank() },
-                )
-                if (details.isNotEmpty()) {
-                    Text(
-                        text = details.joinToString(" • "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
-            HorizontalDivider()
-            FormatSelectionSection(
-                formats = video.formats,
-                selectedFormatId = selectedFormatId,
-                downloadState = downloadState,
-                onFormatSelected = onFormatSelected,
-                onDownload = onDownload,
-                onCancel = onCancel,
-                onOpen = onOpen,
-                modifier = Modifier.padding(16.dp),
+            val details = listOfNotNull(
+                video.durationSeconds?.let(::formatDuration),
+                video.site?.takeIf { it.isNotBlank() },
             )
+            if (details.isNotEmpty()) {
+                Text(
+                    text = details.joinToString(" • "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
+        FormatSelectionSection(
+            formats = video.formats,
+            mediaTitle = video.title.ifBlank { stringResource(R.string.untitled_video) },
+            thumbnailUrl = video.thumbnailUrl,
+            durationSeconds = video.durationSeconds,
+            selectedFormatId = selectedFormatId,
+            downloadState = downloadState,
+            onFormatSelected = onFormatSelected,
+            onDownload = onDownload,
+            onCancel = onCancel,
+            onOpen = onOpen,
+        )
     }
 }
 
 @Composable
 private fun FormatSelectionSection(
     formats: List<SelectableFormat>,
+    mediaTitle: String,
+    thumbnailUrl: String?,
+    durationSeconds: Int?,
     selectedFormatId: String?,
     downloadState: DownloadUiState,
     onFormatSelected: (String) -> Unit,
@@ -513,168 +546,165 @@ private fun FormatSelectionSection(
     onOpen: (DownloadedFile) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val videoFormats = formats.filter { it.hasVideo }
-    val audioFormats = formats.filter { !it.hasVideo && it.hasAudio }
-    val selectedFormat = formats.firstOrNull { it.formatId == selectedFormatId }
     val isDownloading = downloadState is DownloadUiState.Downloading
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            text = stringResource(R.string.video_quality),
+            text = stringResource(R.string.quality),
             style = MaterialTheme.typography.titleMedium,
         )
 
-        if (videoFormats.isEmpty()) {
+        if (formats.none { it.hasVideo }) {
             Text(
                 text = stringResource(R.string.no_video_formats),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        } else {
-            videoFormats.forEach { format ->
-                FormatRow(
-                    format = format,
-                    title = format.height?.let { "${it}p" }
-                        ?: stringResource(R.string.video_format),
-                    selected = selectedFormatId == format.formatId,
-                    enabled = !isDownloading,
-                    onSelected = { onFormatSelected(format.formatId) },
-                )
-            }
         }
 
-        if (audioFormats.isNotEmpty()) {
-            Text(
-                text = stringResource(R.string.audio),
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-            audioFormats.forEach { format ->
-                FormatRow(
-                    format = format,
-                    title = stringResource(R.string.best_audio),
-                    selected = selectedFormatId == format.formatId,
-                    enabled = !isDownloading,
-                    onSelected = { onFormatSelected(format.formatId) },
-                )
+        formats.chunked(2).forEach { rowFormats ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                rowFormats.forEach { format ->
+                    FormatCard(
+                        format = format,
+                        mediaTitle = mediaTitle,
+                        thumbnailUrl = thumbnailUrl,
+                        durationSeconds = durationSeconds,
+                        selected = selectedFormatId == format.formatId,
+                        enabled = !isDownloading,
+                        onSelected = { onFormatSelected(format.formatId) },
+                        onDownload = {
+                            onFormatSelected(format.formatId)
+                            onDownload(format)
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (rowFormats.size == 1) Spacer(modifier = Modifier.weight(1f))
             }
         }
 
         when (downloadState) {
-            is DownloadUiState.Downloading -> {
-                val progress = downloadState.progress
-                Text(
-                    text = progress.percent?.let {
-                        stringResource(R.string.downloading_percent, it.toInt().coerceIn(0, 100))
-                    } ?: stringResource(R.string.downloading),
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                if (progress.downloadedBytes != null && progress.totalBytes != null) {
-                    Text(
-                        text = stringResource(
-                            R.string.download_size_progress,
-                            formatProgressBytes(progress.downloadedBytes, progress.sizeUsesBinaryUnits),
-                            formatProgressBytes(progress.totalBytes, progress.sizeUsesBinaryUnits),
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-                val speed = progress.bytesPerSecond?.let {
-                    "${formatProgressBytes(it, progress.speedUsesBinaryUnits)}/s"
-                }
-                val eta = progress.etaSeconds?.let {
-                    stringResource(R.string.download_eta_remaining, formatEta(it))
-                }
-                listOfNotNull(speed, eta).takeIf { it.isNotEmpty() }?.let { details ->
-                    Text(
-                        text = details.joinToString(" • "),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                progress.percent?.let { percent ->
-                    LinearProgressIndicator(
-                        progress = { percent / 100f },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                } ?: LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                OutlinedButton(
-                    onClick = onCancel,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(R.string.cancel))
-                }
-            }
-            is DownloadUiState.Complete -> {
-                Text(
-                    text = stringResource(R.string.download_complete),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    text = downloadState.file.fileName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = formatFileSize(downloadState.file.sizeBytes),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = stringResource(R.string.saved_to_downloads),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedButton(
-                    onClick = { onOpen(downloadState.file) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(stringResource(R.string.open))
-                }
-            }
-            is DownloadUiState.Failed -> {
-                Text(
-                    text = downloadState.detail?.let {
-                        stringResource(R.string.download_failed_with_detail, it)
-                    } ?: stringResource(R.string.download_failed),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
+            is DownloadUiState.Downloading -> DownloadProgressCard(downloadState.progress, onCancel)
+            is DownloadUiState.Complete -> DownloadSuccessCard(downloadState.file, onOpen)
+            is DownloadUiState.Failed -> DownloadErrorCard()
             DownloadUiState.Idle -> Unit
         }
 
-        Button(
-            onClick = { selectedFormat?.let(onDownload) },
-            enabled = selectedFormat?.hasAudio == true && !isDownloading,
-            modifier = Modifier.fillMaxWidth(),
+    }
+}
+
+@Composable
+private fun DownloadProgressCard(progress: DownloadProgress, onCancel: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                when {
-                    selectedFormat == null -> stringResource(R.string.select_format)
-                    selectedFormat.hasVideo && !selectedFormat.hasAudio -> {
-                        stringResource(R.string.download_unavailable)
-                    }
-                    !selectedFormat.hasVideo -> stringResource(R.string.download_audio)
-                    selectedFormat.height != null -> {
-                        stringResource(R.string.download_quality, selectedFormat.height)
-                    }
-                    else -> stringResource(R.string.download)
-                },
+                text = progress.percent?.let {
+                    stringResource(R.string.downloading_percent, it.toInt().coerceIn(0, 100))
+                } ?: stringResource(R.string.downloading),
+                style = MaterialTheme.typography.titleSmall,
             )
+            if (progress.downloadedBytes != null && progress.totalBytes != null) {
+                Text(
+                    text = stringResource(
+                        R.string.download_size_progress,
+                        formatProgressBytes(progress.downloadedBytes, progress.sizeUsesBinaryUnits),
+                        formatProgressBytes(progress.totalBytes, progress.sizeUsesBinaryUnits),
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            val speed = progress.bytesPerSecond?.let {
+                "${formatProgressBytes(it, progress.speedUsesBinaryUnits)}/s"
+            }
+            val eta = progress.etaSeconds?.let {
+                stringResource(R.string.download_eta_remaining, formatEta(it))
+            }
+            listOfNotNull(speed, eta).takeIf { it.isNotEmpty() }?.let { details ->
+                Text(text = details.joinToString(" • "), style = MaterialTheme.typography.bodyMedium)
+            }
+            progress.percent?.let { percent ->
+                LinearProgressIndicator(
+                    progress = { percent / 100f },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } ?: LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.cancel))
+            }
         }
     }
 }
 
 @Composable
-private fun FormatRow(
+private fun DownloadSuccessCard(file: DownloadedFile, onOpen: (DownloadedFile) -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(stringResource(R.string.download_complete), style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = file.fileName,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(formatFileSize(file.sizeBytes), style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.saved_to_downloads), style = MaterialTheme.typography.bodyMedium)
+            OutlinedButton(onClick = { onOpen(file) }, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.open))
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadErrorCard() {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            text = stringResource(R.string.download_failed),
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(16.dp),
+        )
+    }
+}
+
+@Composable
+private fun FormatCard(
     format: SelectableFormat,
-    title: String,
+    mediaTitle: String,
+    thumbnailUrl: String?,
+    durationSeconds: Int?,
     selected: Boolean,
     enabled: Boolean,
     onSelected: () -> Unit,
+    onDownload: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Card(
         colors = CardDefaults.cardColors(
@@ -684,71 +714,117 @@ private fun FormatRow(
                 MaterialTheme.colorScheme.surfaceContainerLow
             },
         ),
-        border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 72.dp)
-            .selectable(
+        border = BorderStroke(
+            width = if (selected) 2.dp else 1.dp,
+            color = if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outlineVariant,
+        ),
+        shape = RoundedCornerShape(18.dp),
+        modifier = modifier.selectable(
                 selected = selected,
                 enabled = enabled,
                 onClick = onSelected,
                 role = Role.RadioButton,
             ),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            RadioButton(selected = selected, onClick = null, enabled = enabled)
-            Column(
-                modifier = Modifier.padding(start = 12.dp).weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Box(modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
+                thumbnailUrl?.let {
+                    AsyncImage(
+                        model = it,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+                Surface(
+                    color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.88f),
+                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
                 ) {
                     Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleSmall,
-                        modifier = Modifier.weight(1f),
+                        text = format.extension?.uppercase() ?: "—",
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
                     )
-                    format.extension?.let {
+                }
+                durationSeconds?.let {
+                    Surface(
+                        color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.88f),
+                        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+                    ) {
                         Text(
-                            text = it.uppercase(),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            text = formatDuration(it),
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
                         )
                     }
                 }
-                Text(
-                    text = when {
-                        format.hasVideo && format.hasAudio -> stringResource(R.string.video_and_audio)
-                        format.hasVideo -> stringResource(R.string.video_only_unavailable_short)
-                        format.bitrateKbps != null -> {
-                            stringResource(R.string.audio_bitrate, format.bitrateKbps)
-                        }
-                        else -> stringResource(R.string.audio_only)
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                format.fileSizeBytes?.let { size ->
+            }
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        text = if (format.fileSizeIsApproximate) {
-                            stringResource(R.string.approximate_size, formatFileSize(size))
-                        } else {
-                            formatFileSize(size)
-                        },
+                        text = mediaTitle,
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    RadioButton(selected = selected, onClick = null, enabled = enabled)
+                }
+                Text(
+                    text = formatCardMetadata(format),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (format.hasVideo && !format.hasAudio) {
+                    Text(
+                        text = stringResource(R.string.requires_merging),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+                Button(
+                    onClick = onDownload,
+                    enabled = enabled && format.hasAudio,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.size(6.dp))
+                    Text(
+                        text = if (!format.hasVideo) stringResource(R.string.download_audio)
+                        else stringResource(R.string.download),
+                        maxLines = 1,
                     )
                 }
             }
         }
     }
 }
+
+private fun formatCardMetadata(format: SelectableFormat): String = listOfNotNull(
+    if (format.hasVideo) format.height?.let { "${it}p" } else format.bitrateKbps?.let { "$it kbps" },
+    format.extension?.uppercase(),
+    format.fileSizeBytes?.let(::formatFileSize),
+).joinToString(" • ")
 
 private fun formatFileSize(bytes: Long): String {
     val megabytes = bytes / (1024.0 * 1024.0)
@@ -797,6 +873,7 @@ private enum class AnalysisError {
 }
 
 private const val ANALYSIS_TAG = "PreloadAnalysis"
+private const val DOWNLOAD_TAG = "PreloadDownload"
 
 private sealed interface DownloadUiState {
     data object Idle : DownloadUiState

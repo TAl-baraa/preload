@@ -3,6 +3,7 @@
     <string name="app_description">تنزيل الفيديو</string>
     <string name="url_placeholder">ألصق رابط الفيديو</string>
     <string name="clear_url">مسح رابط الفيديو</string>
+    <string name="clear">مسح</string>
     <string name="paste">لصق</string>
     <string name="analyze">تحليل</string>
     <string name="analyzing">جارٍ تحليل الرابط…</string>
@@ -17,12 +18,14 @@
     <string name="video_thumbnail">صورة الفيديو المصغّرة</string>
     <string name="untitled_video">فيديو بلا عنوان</string>
     <string name="video_quality">جودة الفيديو</string>
+    <string name="quality">الجودة</string>
     <string name="video_format">صيغة الفيديو</string>
     <string name="no_video_formats">لم يُعثر على صيغ فيديو لهذا الرابط.</string>
     <string name="audio">الصوت</string>
     <string name="best_audio">أفضل جودة صوت</string>
     <string name="video_and_audio">فيديو + صوت</string>
     <string name="video_only_unavailable_short">فيديو فقط • يتطلب دمج الصوت</string>
+    <string name="requires_merging">يتطلب دمج</string>
     <string name="audio_only">صوت فقط</string>
     <string name="audio_bitrate">صوت فقط • %1$d كيلوبت/ث</string>
     <string name="approximate_size">حوالي %1$s</string>
