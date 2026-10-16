@@ -6,15 +6,16 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,14 +23,18 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -44,6 +49,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,10 +69,11 @@ import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
     private var url by mutableStateOf("")
     private val analyzer by lazy { VideoAnalyzer(applicationContext) }
     private val downloader by lazy { VideoDownloader(applicationContext) }
+    private val appPreferences by lazy { AppPreferences(applicationContext) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,17 +82,31 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch { downloader.initialize() }
         enableEdgeToEdge()
         setContent {
+            val themePreference by appPreferences.theme.collectAsState(ThemePreference.System)
+            val useDarkTheme = when (themePreference) {
+                ThemePreference.System -> isSystemInDarkTheme()
+                ThemePreference.Light -> false
+                ThemePreference.Dark -> true
+            }
+
             MaterialTheme(
-                colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme(),
+                colorScheme = if (useDarkTheme) darkColorScheme() else lightColorScheme(),
             ) {
-                PreloadScreen(
-                    url = url,
-                    onUrlChange = { url = it },
-                    onAnalyze = analyzer::analyze,
-                    onDownload = downloader::download,
-                    onCancelDownload = downloader::cancel,
-                    onOpenDownload = ::openDownloadedFile,
-                )
+                PreloadAppShell(
+                    themePreference = themePreference,
+                    onThemePreferenceChanged = { preference ->
+                        lifecycleScope.launch { appPreferences.setTheme(preference) }
+                    },
+                ) {
+                    PreloadScreen(
+                        url = url,
+                        onUrlChange = { url = it },
+                        onAnalyze = analyzer::analyze,
+                        onDownload = downloader::download,
+                        onCancelDownload = downloader::cancel,
+                        onOpenDownload = ::openDownloadedFile,
+                    )
+                }
             }
         }
     }
@@ -131,6 +152,7 @@ private fun PreloadScreen(
 ) {
     var isLoading by remember { mutableStateOf(false) }
     var analyzedVideo by remember { mutableStateOf<AnalyzedVideo?>(null) }
+    var analysisError by remember { mutableStateOf<AnalysisError?>(null) }
     var selectedFormatId by remember { mutableStateOf<String?>(null) }
     var downloadState by remember { mutableStateOf<DownloadUiState>(DownloadUiState.Idle) }
     var downloadGeneration by remember { mutableStateOf(0L) }
@@ -139,6 +161,9 @@ private fun PreloadScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val analysisFailedMessage = stringResource(R.string.analysis_failed)
+    val invalidLinkMessage = stringResource(R.string.analysis_invalid_link)
+    val networkErrorMessage = stringResource(R.string.analysis_network_error)
+    val unavailableMediaMessage = stringResource(R.string.analysis_media_unavailable)
     val downloadFailedMessage = stringResource(R.string.download_failed)
     val downloadCompleteMessage = stringResource(R.string.download_complete)
     val videoOnlyMessage = stringResource(R.string.video_only_unavailable)
@@ -205,7 +230,7 @@ private fun PreloadScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(contentPadding)
-                .padding(horizontal = 24.dp, vertical = 28.dp),
+                .padding(horizontal = 16.dp, vertical = 20.dp),
         ) {
             Text(
                 text = stringResource(R.string.app_name),
@@ -259,17 +284,20 @@ private fun PreloadScreen(
                     onClick = {
                         coroutineScope.launch {
                             isLoading = true
+                            analysisError = null
                             analyzedVideo = null
                             selectedFormatId = null
                             downloadState = DownloadUiState.Idle
                             try {
-                                analyzedVideo = onAnalyze(url.trim())
+                                val trimmedUrl = url.trim()
+                                if (!trimmedUrl.isLikelyWebUrl()) {
+                                    analysisError = AnalysisError.InvalidLink
+                                } else {
+                                    analyzedVideo = onAnalyze(trimmedUrl)
+                                }
                             } catch (error: Throwable) {
-                                val detail = error.safeMessage()
-                                snackbarHostState.showSnackbar(
-                                    if (detail == null) analysisFailedMessage
-                                    else "$analysisFailedMessage: $detail",
-                                )
+                                Log.e(ANALYSIS_TAG, "Video analysis failed for ${url.trim()}", error)
+                                analysisError = error.toAnalysisError()
                             } finally {
                                 isLoading = false
                             }
@@ -282,60 +310,73 @@ private fun PreloadScreen(
                 }
 
                 if (isLoading) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                        contentAlignment = Alignment.Center,
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        CircularProgressIndicator()
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        Text(
+                            text = stringResource(R.string.analyzing),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
                     }
                 }
 
-                analyzedVideo?.let { video ->
-                    MetadataCard(video)
-                    FormatSelectionSection(
-                        formats = video.formats,
-                        selectedFormatId = selectedFormatId,
-                        downloadState = downloadState,
-                        onFormatSelected = {
-                            selectedFormatId = it
-                            downloadState = DownloadUiState.Idle
-                        },
-                        onDownload = { selectedFormat ->
-                            when {
-                                selectedFormat.hasVideo && !selectedFormat.hasAudio -> {
-                                    coroutineScope.launch { snackbarHostState.showSnackbar(videoOnlyMessage) }
-                                }
-                                Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
-                                    ContextCompat.checkSelfPermission(
-                                        context,
-                                        Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                                    ) != PackageManager.PERMISSION_GRANTED -> {
-                                    pendingLegacyDownload = { startDownload(selectedFormat) }
-                                    storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                                }
-                                else -> startDownload(selectedFormat)
-                            }
-                        },
-                        onCancel = {
-                            if (!onCancelDownload()) {
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar(cancelFailedMessage)
-                                }
-                            }
-                        },
-                        onOpen = { file ->
-                            if (!onOpenDownload(file)) {
-                                coroutineScope.launch { snackbarHostState.showSnackbar(openFailedMessage) }
-                            }
+                analysisError?.let { error ->
+                    AnalysisErrorCard(
+                        message = when (error) {
+                            AnalysisError.InvalidLink -> invalidLinkMessage
+                            AnalysisError.Network -> networkErrorMessage
+                            AnalysisError.UnavailableMedia -> unavailableMediaMessage
+                            AnalysisError.Generic -> analysisFailedMessage
                         },
                     )
                 }
 
-                Text(
-                    text = stringResource(R.string.supported_sites_message),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                when {
+                    analyzedVideo != null -> {
+                        val video = analyzedVideo!!
+                        AnalyzedResultCard(
+                            video = video,
+                            selectedFormatId = selectedFormatId,
+                            downloadState = downloadState,
+                            onFormatSelected = {
+                                selectedFormatId = it
+                                downloadState = DownloadUiState.Idle
+                            },
+                            onDownload = { selectedFormat ->
+                                when {
+                                    selectedFormat.hasVideo && !selectedFormat.hasAudio -> {
+                                        coroutineScope.launch { snackbarHostState.showSnackbar(videoOnlyMessage) }
+                                    }
+                                    Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+                                        ContextCompat.checkSelfPermission(
+                                            context,
+                                            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                                        ) != PackageManager.PERMISSION_GRANTED -> {
+                                        pendingLegacyDownload = { startDownload(selectedFormat) }
+                                        storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                                    }
+                                    else -> startDownload(selectedFormat)
+                                }
+                            },
+                            onCancel = {
+                                if (!onCancelDownload()) {
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar(cancelFailedMessage)
+                                    }
+                                }
+                            },
+                            onOpen = { file ->
+                                if (!onOpenDownload(file)) {
+                                    coroutineScope.launch { snackbarHostState.showSnackbar(openFailedMessage) }
+                                }
+                            },
+                        )
+                    }
+                    !isLoading && analysisError == null -> InitialStateCard()
+                }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -351,12 +392,62 @@ private fun PreloadScreen(
 }
 
 @Composable
-private fun MetadataCard(video: AnalyzedVideo) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+private fun InitialStateCard() {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.initial_state_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = stringResource(R.string.initial_state_support),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AnalysisErrorCard(message: String) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            Text(stringResource(R.string.analysis_error_title), style = MaterialTheme.typography.titleSmall)
+            Text(message, style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.analysis_retry_hint), style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun AnalyzedResultCard(
+    video: AnalyzedVideo,
+    selectedFormatId: String?,
+    downloadState: DownloadUiState,
+    onFormatSelected: (String) -> Unit,
+    onDownload: (SelectableFormat) -> Unit,
+    onCancel: () -> Unit,
+    onOpen: (DownloadedFile) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column {
             video.thumbnailUrl?.let { thumbnailUrl ->
                 AsyncImage(
                     model = thumbnailUrl,
@@ -365,18 +456,48 @@ private fun MetadataCard(video: AnalyzedVideo) {
                     contentScale = ContentScale.Crop,
                 )
             }
-
-            MetadataField(
-                stringResource(R.string.title_label),
-                video.title.ifBlank { stringResource(R.string.untitled_video) },
-            )
-            video.uploader?.let { MetadataField(stringResource(R.string.uploader_label), it) }
-            video.durationSeconds?.let {
-                MetadataField(stringResource(R.string.duration_label), formatDuration(it))
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = video.title.ifBlank { stringResource(R.string.untitled_video) },
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                video.uploader?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                val details = listOfNotNull(
+                    video.durationSeconds?.let(::formatDuration),
+                    video.site?.takeIf { it.isNotBlank() },
+                )
+                if (details.isNotEmpty()) {
+                    Text(
+                        text = details.joinToString(" • "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            video.site?.let { MetadataField(stringResource(R.string.site_label), it) }
-            video.webpageUrl?.let { MetadataField(stringResource(R.string.webpage_label), it) }
-
+            HorizontalDivider()
+            FormatSelectionSection(
+                formats = video.formats,
+                selectedFormatId = selectedFormatId,
+                downloadState = downloadState,
+                onFormatSelected = onFormatSelected,
+                onDownload = onDownload,
+                onCancel = onCancel,
+                onOpen = onOpen,
+                modifier = Modifier.padding(16.dp),
+            )
         }
     }
 }
@@ -390,13 +511,14 @@ private fun FormatSelectionSection(
     onDownload: (SelectableFormat) -> Unit,
     onCancel: () -> Unit,
     onOpen: (DownloadedFile) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val videoFormats = formats.filter { it.hasVideo }
     val audioFormats = formats.filter { !it.hasVideo && it.hasAudio }
     val selectedFormat = formats.firstOrNull { it.formatId == selectedFormatId }
     val isDownloading = downloadState is DownloadUiState.Downloading
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
             text = stringResource(R.string.video_quality),
             style = MaterialTheme.typography.titleMedium,
@@ -526,10 +648,22 @@ private fun FormatSelectionSection(
 
         Button(
             onClick = { selectedFormat?.let(onDownload) },
-            enabled = selectedFormat != null && !isDownloading,
+            enabled = selectedFormat?.hasAudio == true && !isDownloading,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(stringResource(R.string.download))
+            Text(
+                when {
+                    selectedFormat == null -> stringResource(R.string.select_format)
+                    selectedFormat.hasVideo && !selectedFormat.hasAudio -> {
+                        stringResource(R.string.download_unavailable)
+                    }
+                    !selectedFormat.hasVideo -> stringResource(R.string.download_audio)
+                    selectedFormat.height != null -> {
+                        stringResource(R.string.download_quality, selectedFormat.height)
+                    }
+                    else -> stringResource(R.string.download)
+                },
+            )
         }
     }
 }
@@ -543,8 +677,17 @@ private fun FormatRow(
     onSelected: () -> Unit,
 ) {
     Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerLow
+            },
+        ),
+        border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 72.dp)
             .selectable(
                 selected = selected,
                 enabled = enabled,
@@ -553,7 +696,7 @@ private fun FormatRow(
             ),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             RadioButton(selected = selected, onClick = null, enabled = enabled)
@@ -561,19 +704,34 @@ private fun FormatRow(
                 modifier = Modifier.padding(start = 12.dp).weight(1f),
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                Text(text = title, style = MaterialTheme.typography.titleSmall)
-                Text(
-                    text = formatTechnicalDetails(format),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    format.extension?.let {
+                        Text(
+                            text = it.uppercase(),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 Text(
                     text = when {
                         format.hasVideo && format.hasAudio -> stringResource(R.string.video_and_audio)
-                        format.hasVideo -> stringResource(R.string.video_only_merge)
+                        format.hasVideo -> stringResource(R.string.video_only_unavailable_short)
+                        format.bitrateKbps != null -> {
+                            stringResource(R.string.audio_bitrate, format.bitrateKbps)
+                        }
                         else -> stringResource(R.string.audio_only)
                     },
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 format.fileSizeBytes?.let { size ->
@@ -592,33 +750,10 @@ private fun FormatRow(
     }
 }
 
-private fun formatTechnicalDetails(format: SelectableFormat): String = buildList {
-    format.extension?.let { add(it.uppercase()) }
-    format.fps?.let { add("$it fps") }
-    format.bitrateKbps?.let { add("$it kbps") }
-}.ifEmpty { listOf("Format ${format.formatId}") }.joinToString(" • ")
-
 private fun formatFileSize(bytes: Long): String {
     val megabytes = bytes / (1024.0 * 1024.0)
     return if (megabytes >= 1.0) "%.1f MB".format(megabytes)
     else "%.1f KB".format(bytes / 1024.0)
-}
-
-@Composable
-private fun MetadataField(label: String, value: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyLarge,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
 }
 
 private fun formatDuration(totalSeconds: Int): String {
@@ -634,6 +769,34 @@ private fun Throwable.safeMessage(): String? = message
     ?.firstOrNull { it.isNotBlank() }
     ?.trim()
     ?.take(180)
+
+private fun String.isLikelyWebUrl(): Boolean =
+    startsWith("https://", ignoreCase = true) || startsWith("http://", ignoreCase = true)
+
+private fun Throwable.toAnalysisError(): AnalysisError {
+    val detail = generateSequence(this) { it.cause }
+        .mapNotNull { it.message }
+        .joinToString(" ")
+        .lowercase()
+    return when {
+        detail.contains("unable to resolve host") || detail.contains("network") ||
+            detail.contains("timed out") || detail.contains("timeout") -> AnalysisError.Network
+        detail.contains("unsupported url") || detail.contains("invalid url") ||
+            detail.contains("not a valid url") -> AnalysisError.InvalidLink
+        detail.contains("unavailable") || detail.contains("unsupported") ||
+            detail.contains("private video") || detail.contains("removed") -> AnalysisError.UnavailableMedia
+        else -> AnalysisError.Generic
+    }
+}
+
+private enum class AnalysisError {
+    InvalidLink,
+    Network,
+    UnavailableMedia,
+    Generic,
+}
+
+private const val ANALYSIS_TAG = "PreloadAnalysis"
 
 private sealed interface DownloadUiState {
     data object Idle : DownloadUiState
