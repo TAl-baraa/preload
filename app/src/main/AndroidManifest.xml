@@ -6,6 +6,7 @@
         android:maxSdkVersion="28" />
 
     <application
+        android:name=".PreloadApplication"
         android:allowBackup="false"
         android:label="@string/app_name"
         android:localeConfig="@xml/locales_config"

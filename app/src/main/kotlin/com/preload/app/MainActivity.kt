@@ -1,7 +1,6 @@
 package com.preload.app
 
 import android.Manifest
-import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -39,7 +38,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -79,16 +77,16 @@ import kotlinx.coroutines.launch
 class MainActivity : AppCompatActivity() {
     private var url by mutableStateOf("")
     private val analyzer by lazy { VideoAnalyzer(applicationContext) }
-    private val downloader by lazy { VideoDownloader(applicationContext) }
+    private val downloadQueue by lazy { (application as PreloadApplication).downloadQueue }
     private val appPreferences by lazy { AppPreferences(applicationContext) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleShareIntent(intent)
         lifecycleScope.launch { analyzer.initialize() }
-        lifecycleScope.launch { downloader.initialize() }
         setContent {
             val themePreference by appPreferences.theme.collectAsState(ThemePreference.System)
+            val downloadJobs by downloadQueue.jobs.collectAsState(emptyList())
             val useDarkTheme = when (themePreference) {
                 ThemePreference.System -> isSystemInDarkTheme()
                 ThemePreference.Light -> false
@@ -113,6 +111,10 @@ class MainActivity : AppCompatActivity() {
             PreloadTheme(darkTheme = useDarkTheme) {
                 PreloadAppShell(
                     themePreference = themePreference,
+                    downloadJobs = downloadJobs,
+                    onCancelDownload = { jobId ->
+                        lifecycleScope.launch { downloadQueue.cancel(jobId) }
+                    },
                     onThemePreferenceChanged = { preference ->
                         lifecycleScope.launch { appPreferences.setTheme(preference) }
                     },
@@ -121,9 +123,7 @@ class MainActivity : AppCompatActivity() {
                         url = url,
                         onUrlChange = { url = it },
                         onAnalyze = analyzer::analyze,
-                        onDownload = downloader::download,
-                        onCancelDownload = downloader::cancel,
-                        onOpenDownload = ::openDownloadedFile,
+                        onEnqueue = downloadQueue::enqueue,
                     )
                 }
             }
@@ -143,18 +143,6 @@ class MainActivity : AppCompatActivity() {
         url = URL_PATTERN.find(sharedText)?.value ?: sharedText
     }
 
-    private fun openDownloadedFile(file: DownloadedFile): Boolean = try {
-        startActivity(
-            Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(file.contentUri, file.mimeType)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            },
-        )
-        true
-    } catch (_: ActivityNotFoundException) {
-        false
-    }
-
     private companion object {
         val URL_PATTERN = Regex("https?://\\S+", RegexOption.IGNORE_CASE)
     }
@@ -165,16 +153,12 @@ private fun PreloadScreen(
     url: String,
     onUrlChange: (String) -> Unit,
     onAnalyze: suspend (String) -> AnalyzedVideo,
-    onDownload: suspend (String, String, SelectableFormat, (DownloadProgress) -> Unit) -> DownloadedFile,
-    onCancelDownload: () -> Boolean,
-    onOpenDownload: (DownloadedFile) -> Boolean,
+    onEnqueue: suspend (String, AnalyzedVideo, SelectableFormat, String) -> String,
 ) {
     var isLoading by remember { mutableStateOf(false) }
     var analyzedVideo by remember { mutableStateOf<AnalyzedVideo?>(null) }
     var analysisError by remember { mutableStateOf<AnalysisError?>(null) }
     var selectedFormatId by remember { mutableStateOf<String?>(null) }
-    var downloadState by remember { mutableStateOf<DownloadUiState>(DownloadUiState.Idle) }
-    var downloadGeneration by remember { mutableStateOf(0L) }
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -183,47 +167,26 @@ private fun PreloadScreen(
     val invalidLinkMessage = stringResource(R.string.analysis_invalid_link)
     val networkErrorMessage = stringResource(R.string.analysis_network_error)
     val unavailableMediaMessage = stringResource(R.string.analysis_media_unavailable)
-    val downloadFailedMessage = stringResource(R.string.download_failed)
-    val downloadCompleteMessage = stringResource(R.string.download_complete)
+    val addedToDownloadsMessage = stringResource(R.string.added_to_downloads)
+    val addToDownloadsFailedMessage = stringResource(R.string.add_to_downloads_failed)
     val videoOnlyMessage = stringResource(R.string.video_only_unavailable)
-    val cancelFailedMessage = stringResource(R.string.cancel_failed)
-    val downloadCanceledMessage = stringResource(R.string.download_canceled)
-    val downloadPublishFailedMessage = stringResource(R.string.download_publish_failed)
     val storagePermissionDeniedMessage = stringResource(R.string.storage_permission_denied)
-    val openFailedMessage = stringResource(R.string.open_failed)
     var pendingLegacyDownload by remember { mutableStateOf<(() -> Unit)?>(null) }
 
-    val startDownload: (SelectableFormat) -> Unit = { selectedFormat ->
+    val enqueueDownload: (SelectableFormat) -> Unit = { selectedFormat ->
         coroutineScope.launch {
-            val generation = ++downloadGeneration
-            downloadState = DownloadUiState.Downloading(DownloadProgress())
             try {
                 val video = analyzedVideo ?: return@launch
-                val result = onDownload(
+                onEnqueue(
                     video.webpageUrl ?: url.trim(),
-                    video.title,
+                    video,
                     selectedFormat,
-                ) { progress ->
-                    coroutineScope.launch {
-                        if (downloadGeneration == generation && downloadState is DownloadUiState.Downloading) {
-                            downloadState = DownloadUiState.Downloading(progress)
-                        }
-                    }
-                }
-                if (downloadGeneration == generation) downloadGeneration++
-                downloadState = DownloadUiState.Complete(result)
-                snackbarHostState.showSnackbar(downloadCompleteMessage)
-            } catch (_: DownloadCanceledException) {
-                if (downloadGeneration == generation) downloadGeneration++
-                downloadState = DownloadUiState.Idle
-                snackbarHostState.showSnackbar(downloadCanceledMessage)
-            } catch (_: DownloadPublishException) {
-                downloadState = DownloadUiState.Failed(downloadPublishFailedMessage)
-                snackbarHostState.showSnackbar(downloadPublishFailedMessage)
+                    formatCardMetadata(selectedFormat),
+                )
+                snackbarHostState.showSnackbar(addedToDownloadsMessage)
             } catch (error: Throwable) {
-                Log.e(DOWNLOAD_TAG, "Download failed", error)
-                downloadState = DownloadUiState.Failed(null)
-                snackbarHostState.showSnackbar(downloadFailedMessage)
+                Log.e(DOWNLOAD_TAG, "Could not enqueue download", error)
+                snackbarHostState.showSnackbar(addToDownloadsFailedMessage)
             }
         }
     }
@@ -330,7 +293,6 @@ private fun PreloadScreen(
                                     analysisError = null
                                     analyzedVideo = null
                                     selectedFormatId = null
-                                    downloadState = DownloadUiState.Idle
                                     try {
                                         val trimmedUrl = url.trim()
                                         if (!trimmedUrl.isLikelyWebUrl()) {
@@ -385,11 +347,7 @@ private fun PreloadScreen(
                         AnalyzedResultCard(
                             video = video,
                             selectedFormatId = selectedFormatId,
-                            downloadState = downloadState,
-                            onFormatSelected = {
-                                selectedFormatId = it
-                                downloadState = DownloadUiState.Idle
-                            },
+                            onFormatSelected = { selectedFormatId = it },
                             onDownload = { selectedFormat ->
                                 when {
                                     selectedFormat.hasVideo && !selectedFormat.hasAudio -> {
@@ -400,22 +358,10 @@ private fun PreloadScreen(
                                             context,
                                             Manifest.permission.WRITE_EXTERNAL_STORAGE,
                                         ) != PackageManager.PERMISSION_GRANTED -> {
-                                        pendingLegacyDownload = { startDownload(selectedFormat) }
+                                        pendingLegacyDownload = { enqueueDownload(selectedFormat) }
                                         storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                                     }
-                                    else -> startDownload(selectedFormat)
-                                }
-                            },
-                            onCancel = {
-                                if (!onCancelDownload()) {
-                                    coroutineScope.launch {
-                                        snackbarHostState.showSnackbar(cancelFailedMessage)
-                                    }
-                                }
-                            },
-                            onOpen = { file ->
-                                if (!onOpenDownload(file)) {
-                                    coroutineScope.launch { snackbarHostState.showSnackbar(openFailedMessage) }
+                                    else -> enqueueDownload(selectedFormat)
                                 }
                             },
                         )
@@ -479,11 +425,8 @@ private fun AnalysisErrorCard(message: String) {
 private fun AnalyzedResultCard(
     video: AnalyzedVideo,
     selectedFormatId: String?,
-    downloadState: DownloadUiState,
     onFormatSelected: (String) -> Unit,
     onDownload: (SelectableFormat) -> Unit,
-    onCancel: () -> Unit,
-    onOpen: (DownloadedFile) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -523,11 +466,8 @@ private fun AnalyzedResultCard(
             thumbnailUrl = video.thumbnailUrl,
             durationSeconds = video.durationSeconds,
             selectedFormatId = selectedFormatId,
-            downloadState = downloadState,
             onFormatSelected = onFormatSelected,
             onDownload = onDownload,
-            onCancel = onCancel,
-            onOpen = onOpen,
         )
     }
 }
@@ -539,15 +479,10 @@ private fun FormatSelectionSection(
     thumbnailUrl: String?,
     durationSeconds: Int?,
     selectedFormatId: String?,
-    downloadState: DownloadUiState,
     onFormatSelected: (String) -> Unit,
     onDownload: (SelectableFormat) -> Unit,
-    onCancel: () -> Unit,
-    onOpen: (DownloadedFile) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val isDownloading = downloadState is DownloadUiState.Downloading
-
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
             text = stringResource(R.string.quality),
@@ -574,7 +509,7 @@ private fun FormatSelectionSection(
                         thumbnailUrl = thumbnailUrl,
                         durationSeconds = durationSeconds,
                         selected = selectedFormatId == format.formatId,
-                        enabled = !isDownloading,
+                        enabled = true,
                         onSelected = { onFormatSelected(format.formatId) },
                         onDownload = {
                             onFormatSelected(format.formatId)
@@ -587,110 +522,6 @@ private fun FormatSelectionSection(
             }
         }
 
-        when (downloadState) {
-            is DownloadUiState.Downloading -> DownloadProgressCard(downloadState.progress, onCancel)
-            is DownloadUiState.Complete -> DownloadSuccessCard(downloadState.file, onOpen)
-            is DownloadUiState.Failed -> DownloadErrorCard()
-            DownloadUiState.Idle -> Unit
-        }
-
-    }
-}
-
-@Composable
-private fun DownloadProgressCard(progress: DownloadProgress, onCancel: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        ),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                text = progress.percent?.let {
-                    stringResource(R.string.downloading_percent, it.toInt().coerceIn(0, 100))
-                } ?: stringResource(R.string.downloading),
-                style = MaterialTheme.typography.titleSmall,
-            )
-            if (progress.downloadedBytes != null && progress.totalBytes != null) {
-                Text(
-                    text = stringResource(
-                        R.string.download_size_progress,
-                        formatProgressBytes(progress.downloadedBytes, progress.sizeUsesBinaryUnits),
-                        formatProgressBytes(progress.totalBytes, progress.sizeUsesBinaryUnits),
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-            val speed = progress.bytesPerSecond?.let {
-                "${formatProgressBytes(it, progress.speedUsesBinaryUnits)}/s"
-            }
-            val eta = progress.etaSeconds?.let {
-                stringResource(R.string.download_eta_remaining, formatEta(it))
-            }
-            listOfNotNull(speed, eta).takeIf { it.isNotEmpty() }?.let { details ->
-                Text(text = details.joinToString(" • "), style = MaterialTheme.typography.bodyMedium)
-            }
-            progress.percent?.let { percent ->
-                LinearProgressIndicator(
-                    progress = { percent / 100f },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            } ?: LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.cancel))
-            }
-        }
-    }
-}
-
-@Composable
-private fun DownloadSuccessCard(file: DownloadedFile, onOpen: (DownloadedFile) -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        ),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(stringResource(R.string.download_complete), style = MaterialTheme.typography.titleSmall)
-            Text(
-                text = file.fileName,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(formatFileSize(file.sizeBytes), style = MaterialTheme.typography.bodySmall)
-            Text(stringResource(R.string.saved_to_downloads), style = MaterialTheme.typography.bodyMedium)
-            OutlinedButton(onClick = { onOpen(file) }, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.open))
-            }
-        }
-    }
-}
-
-@Composable
-private fun DownloadErrorCard() {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-            contentColor = MaterialTheme.colorScheme.onErrorContainer,
-        ),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(
-            text = stringResource(R.string.download_failed),
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(16.dp),
-        )
     }
 }
 
@@ -874,10 +705,3 @@ private enum class AnalysisError {
 
 private const val ANALYSIS_TAG = "PreloadAnalysis"
 private const val DOWNLOAD_TAG = "PreloadDownload"
-
-private sealed interface DownloadUiState {
-    data object Idle : DownloadUiState
-    data class Downloading(val progress: DownloadProgress) : DownloadUiState
-    data class Complete(val file: DownloadedFile) : DownloadUiState
-    data class Failed(val detail: String?) : DownloadUiState
-}

@@ -33,6 +33,8 @@
     <string name="select_format">اختر صيغة</string>
     <string name="download_unavailable">التنزيل غير متاح</string>
     <string name="download_audio">تنزيل الصوت</string>
+    <string name="added_to_downloads">تمت الإضافة إلى التنزيلات</string>
+    <string name="add_to_downloads_failed">تعذرت إضافة هذا التنزيل</string>
     <string name="download_quality">تنزيل بدقة %1$d بكسل</string>
     <string name="downloading">جارٍ التنزيل…</string>
     <string name="downloading_percent">جارٍ التنزيل… %1$d%%</string>
@@ -57,6 +59,11 @@
     <string name="downloads_title">التنزيلات</string>
     <string name="no_downloads_title">لا توجد تنزيلات بعد</string>
     <string name="no_downloads_message">ستظهر التنزيلات المكتملة هنا.</string>
+    <string name="download_status_queued">في الانتظار</string>
+    <string name="download_status_downloading">جارٍ التنزيل</string>
+    <string name="download_status_completed">مكتمل</string>
+    <string name="download_status_failed">فشل</string>
+    <string name="download_status_cancelled">ملغى</string>
     <string name="settings_title">الإعدادات</string>
     <string name="appearance_section">المظهر</string>
     <string name="theme_setting">السمة</string>

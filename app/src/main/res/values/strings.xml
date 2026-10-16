@@ -33,6 +33,8 @@
     <string name="select_format">Select a format</string>
     <string name="download_unavailable">Download unavailable</string>
     <string name="download_audio">Download audio</string>
+    <string name="added_to_downloads">Added to downloads</string>
+    <string name="add_to_downloads_failed">Could not add this download</string>
     <string name="download_quality">Download %1$dp</string>
     <string name="downloading">Downloading…</string>
     <string name="downloading_percent">Downloading… %1$d%%</string>
@@ -57,6 +59,11 @@
     <string name="downloads_title">Downloads</string>
     <string name="no_downloads_title">No downloads yet</string>
     <string name="no_downloads_message">Your completed downloads will appear here.</string>
+    <string name="download_status_queued">Queued</string>
+    <string name="download_status_downloading">Downloading</string>
+    <string name="download_status_completed">Completed</string>
+    <string name="download_status_failed">Failed</string>
+    <string name="download_status_cancelled">Cancelled</string>
     <string name="settings_title">Settings</string>
     <string name="appearance_section">Appearance</string>
     <string name="theme_setting">Theme</string>

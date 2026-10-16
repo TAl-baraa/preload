@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -26,6 +28,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -62,6 +66,8 @@ private data class DestinationItem(
 @Composable
 fun PreloadAppShell(
     themePreference: ThemePreference,
+    downloadJobs: List<DownloadJob>,
+    onCancelDownload: (String) -> Unit,
     onThemePreferenceChanged: (ThemePreference) -> Unit,
     home: @Composable () -> Unit,
 ) {
@@ -109,7 +115,7 @@ fun PreloadAppShell(
         ) {
             PersistentDestination(selectedDestination == AppDestination.Home) { home() }
             PersistentDestination(selectedDestination == AppDestination.Downloads) {
-                DownloadsScreen()
+                DownloadsScreen(downloadJobs, onCancelDownload)
             }
             PersistentDestination(selectedDestination == AppDestination.Settings) {
                 SettingsScreen(
@@ -138,7 +144,10 @@ private fun PersistentDestination(
 }
 
 @Composable
-private fun DownloadsScreen() {
+private fun DownloadsScreen(
+    jobs: List<DownloadJob>,
+    onCancelDownload: (String) -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -146,7 +155,25 @@ private fun DownloadsScreen() {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(stringResource(R.string.downloads_title), style = MaterialTheme.typography.headlineMedium)
-        Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+        if (jobs.isEmpty()) {
+            Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                EmptyDownloadsCard()
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(jobs, key = { it.id }) { job ->
+                    DownloadJobCard(job, onCancelDownload)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyDownloadsCard() {
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -177,8 +204,64 @@ private fun DownloadsScreen() {
                     )
                 }
             }
+}
+
+@Composable
+private fun DownloadJobCard(job: DownloadJob, onCancelDownload: (String) -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(job.title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                job.formatLabel,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                job.status.label(),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            if (job.status == DownloadStatus.DOWNLOADING) {
+                job.progressPercent?.let { percent ->
+                    LinearProgressIndicator(
+                        progress = { (percent / 100f).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        stringResource(R.string.downloading_percent, percent.toInt().coerceIn(0, 100)),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                } ?: LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+            if (job.status == DownloadStatus.QUEUED || job.status == DownloadStatus.DOWNLOADING) {
+                OutlinedButton(
+                    onClick = { onCancelDownload(job.id) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun DownloadStatus.label(): String = when (this) {
+    DownloadStatus.QUEUED -> stringResource(R.string.download_status_queued)
+    DownloadStatus.DOWNLOADING -> stringResource(R.string.download_status_downloading)
+    DownloadStatus.COMPLETED -> stringResource(R.string.download_status_completed)
+    DownloadStatus.FAILED -> stringResource(R.string.download_status_failed)
+    DownloadStatus.CANCELLED -> stringResource(R.string.download_status_cancelled)
 }
 
 @Composable
