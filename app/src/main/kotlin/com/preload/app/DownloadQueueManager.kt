@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 interface DownloadExecutor {
     suspend fun execute(
@@ -51,6 +52,7 @@ class DownloadQueueManager(
     private val downloader: DownloadExecutor,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val now: () -> Long = System::currentTimeMillis,
+    private val onWorkAvailable: (() -> Unit)? = null,
     private val reportError: (String, Throwable) -> Unit = { message, error ->
         Log.e(TAG, message, error)
     },
@@ -59,13 +61,16 @@ class DownloadQueueManager(
     val activeAndQueuedJobs: Flow<List<DownloadJob>> = dao.observeActiveAndQueued()
 
     private val processingMutex = Mutex()
+    private val recoveryStarted = AtomicBoolean(false)
+    private val pauseRequested = AtomicBoolean(false)
 
     @Volatile
     private var activeJobId: String? = null
 
     fun start() {
+        pauseRequested.set(false)
         scope.launch {
-            dao.resetStaleDownloading()
+            if (recoveryStarted.compareAndSet(false, true)) dao.resetStaleDownloading()
             processQueue()
         }
     }
@@ -110,7 +115,7 @@ class DownloadQueueManager(
                 completedAt = null,
             ),
         )
-        scope.launch { processQueue() }
+        signalWorkAvailable()
         return id
     }
 
@@ -121,14 +126,24 @@ class DownloadQueueManager(
 
     suspend fun retry(jobId: String): Boolean {
         val retried = dao.retryTerminal(jobId) > 0
-        if (retried) scope.launch { processQueue() }
+        if (retried) signalWorkAvailable()
         return retried
     }
 
     suspend fun removeFromHistory(jobId: String): Boolean = dao.deleteTerminal(jobId) > 0
 
+    fun stopForSystemTimeout(): Boolean {
+        pauseRequested.set(true)
+        return activeJobId?.let { downloader.cancel() } ?: false
+    }
+
+    private fun signalWorkAvailable() {
+        onWorkAvailable?.invoke() ?: start()
+    }
+
     private suspend fun processQueue() = processingMutex.withLock {
         while (true) {
+            if (pauseRequested.get()) return@withLock
             val job = dao.getNextQueued() ?: return@withLock
             if (dao.markDownloading(job.id, now()) == 0) continue
             activeJobId = job.id

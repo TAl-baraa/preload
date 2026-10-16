@@ -208,7 +208,9 @@ private fun PreloadScreen(
     val addToDownloadsFailedMessage = stringResource(R.string.add_to_downloads_failed)
     val videoOnlyMessage = stringResource(R.string.video_only_unavailable)
     val storagePermissionDeniedMessage = stringResource(R.string.storage_permission_denied)
+    val notificationPermissionDeniedMessage = stringResource(R.string.notification_permission_denied)
     var pendingLegacyDownload by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var pendingNotificationDownload by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     val enqueueDownload: (SelectableFormat) -> Unit = { selectedFormat ->
         coroutineScope.launch {
@@ -236,6 +238,29 @@ private fun PreloadScreen(
             pending?.invoke()
         } else {
             coroutineScope.launch { snackbarHostState.showSnackbar(storagePermissionDeniedMessage) }
+        }
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val pending = pendingNotificationDownload
+        pendingNotificationDownload = null
+        pending?.invoke()
+        if (!granted) {
+            coroutineScope.launch { snackbarHostState.showSnackbar(notificationPermissionDeniedMessage) }
+        }
+    }
+    val enqueueWithNotificationPermission: (SelectableFormat) -> Unit = { selectedFormat ->
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingNotificationDownload = { enqueueDownload(selectedFormat) }
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            enqueueDownload(selectedFormat)
         }
     }
 
@@ -395,10 +420,12 @@ private fun PreloadScreen(
                                             context,
                                             Manifest.permission.WRITE_EXTERNAL_STORAGE,
                                         ) != PackageManager.PERMISSION_GRANTED -> {
-                                        pendingLegacyDownload = { enqueueDownload(selectedFormat) }
+                                        pendingLegacyDownload = {
+                                            enqueueWithNotificationPermission(selectedFormat)
+                                        }
                                         storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                                     }
-                                    else -> enqueueDownload(selectedFormat)
+                                    else -> enqueueWithNotificationPermission(selectedFormat)
                                 }
                             },
                         )

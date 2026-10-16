@@ -25,6 +25,9 @@ interface DownloadJobDao {
     )
     fun observeActiveAndQueued(): Flow<List<DownloadJob>>
 
+    @Query("SELECT COUNT(*) FROM download_jobs WHERE status IN ('QUEUED', 'DOWNLOADING')")
+    suspend fun pendingCount(): Int
+
     @Query("SELECT * FROM download_jobs WHERE status = 'QUEUED' ORDER BY createdAt ASC LIMIT 1")
     suspend fun getNextQueued(): DownloadJob?
 

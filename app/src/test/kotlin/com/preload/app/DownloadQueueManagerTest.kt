@@ -15,6 +15,33 @@ import org.junit.Test
 
 class DownloadQueueManagerTest {
     @Test
+    fun enqueueWakesForegroundOwnerWithoutStartingASecondRunner() = runBlocking {
+        val dao = FakeDownloadJobDao(emptyList())
+        val executor = FakeExecutor()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        var wakeCount = 0
+        val manager = DownloadQueueManager(
+            dao = dao,
+            downloader = executor,
+            scope = scope,
+            now = { 5L },
+            onWorkAvailable = { wakeCount++ },
+            reportError = { _, _ -> },
+        )
+
+        manager.enqueue("queued", analyzedVideo(), selectableFormat(), "360p • MP4")
+
+        assertEquals(1, wakeCount)
+        assertEquals(DownloadStatus.QUEUED, dao.jobs.value.single().status)
+        assertTrue(executor.startedIds.isEmpty())
+
+        manager.start()
+        await { dao.jobs.value.single().status == DownloadStatus.COMPLETED }
+        assertEquals(listOf("queued"), executor.startedIds)
+        scope.cancel()
+    }
+
+    @Test
     fun staleDownloadingIsResetAndRetried() = runBlocking {
         val stale = job("stale", 1L, DownloadStatus.DOWNLOADING)
         val dao = FakeDownloadJobDao(listOf(stale))
@@ -67,6 +94,23 @@ class DownloadQueueManagerTest {
         assertEquals(DownloadStatus.CANCELLED, dao.job("first")?.status)
         assertEquals(listOf("first", "second"), executor.startedIds)
         assertEquals(1, executor.maxConcurrent)
+        scope.cancel()
+    }
+
+    @Test
+    fun systemTimeoutCancelsActiveAndLeavesNextJobQueued() = runBlocking {
+        val dao = FakeDownloadJobDao(listOf(job("first", 1L), job("second", 2L)))
+        val executor = FakeExecutor(blockId = "first")
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val manager = DownloadQueueManager(dao, executor, scope, { 55L }) { _, _ -> }
+
+        manager.start()
+        await { dao.job("first")?.status == DownloadStatus.DOWNLOADING }
+        assertTrue(manager.stopForSystemTimeout())
+        await { dao.job("first")?.status == DownloadStatus.CANCELLED }
+
+        assertEquals(DownloadStatus.QUEUED, dao.job("second")?.status)
+        assertEquals(listOf("first"), executor.startedIds)
         scope.cancel()
     }
 
@@ -160,6 +204,31 @@ class DownloadQueueManagerTest {
             completedAt = null,
         )
 
+    private fun analyzedVideo() = AnalyzedVideo(
+        title = "queued",
+        uploader = null,
+        thumbnailUrl = null,
+        durationSeconds = null,
+        site = null,
+        webpageUrl = "queued",
+        formats = emptyList(),
+    )
+
+    private fun selectableFormat() = SelectableFormat(
+        formatId = "18",
+        extension = "mp4",
+        width = 640,
+        height = 360,
+        fps = 30,
+        videoCodec = "avc1",
+        audioCodec = "mp4a",
+        bitrateKbps = null,
+        fileSizeBytes = 100,
+        fileSizeIsApproximate = false,
+        hasVideo = true,
+        hasAudio = true,
+    )
+
     private companion object {
         val terminalStatuses = setOf(
             DownloadStatus.COMPLETED,
@@ -225,6 +294,9 @@ private class FakeDownloadJobDao(initial: List<DownloadJob>) : DownloadJobDao {
     }
     override fun observeAll(): Flow<List<DownloadJob>> = jobs
     override fun observeActiveAndQueued(): Flow<List<DownloadJob>> = jobs
+    override suspend fun pendingCount(): Int = jobs.value.count {
+        it.status == DownloadStatus.QUEUED || it.status == DownloadStatus.DOWNLOADING
+    }
     override suspend fun getNextQueued(): DownloadJob? = jobs.value
         .filter { it.status == DownloadStatus.QUEUED }
         .minByOrNull { it.createdAt }

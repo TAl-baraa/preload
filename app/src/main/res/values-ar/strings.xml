@@ -51,6 +51,12 @@
     <string name="download_canceled">أُلغي التنزيل</string>
     <string name="cancel">إلغاء</string>
     <string name="cancel_failed">تعذّر إلغاء التنزيل</string>
+    <string name="notification_channel_downloads">التنزيلات</string>
+    <string name="notification_channel_downloads_description">تقدّم التنزيلات الجارية</string>
+    <string name="notification_preparing_download">جارٍ تجهيز التنزيل…</string>
+    <string name="notification_downloading_title">جارٍ تنزيل: %1$s</string>
+    <string name="notification_queued_count">%1$d في الانتظار</string>
+    <string name="notification_permission_denied">الإشعارات متوقفة. سيستمر التنزيل، لكن قد لا يظهر التقدّم خارج Preload.</string>
     <string name="video_only_unavailable">تتطلب هذه الجودة دمج الصوت، وهو غير متاح حاليًا.</string>
     <string name="privacy_message">بلا إعلانات. بلا تتبع.</string>
     <string name="nav_home">الرئيسية</string>

@@ -51,6 +51,12 @@
     <string name="download_canceled">Download canceled</string>
     <string name="cancel">Cancel</string>
     <string name="cancel_failed">Could not cancel the download</string>
+    <string name="notification_channel_downloads">Downloads</string>
+    <string name="notification_channel_downloads_description">Ongoing download progress</string>
+    <string name="notification_preparing_download">Preparing download…</string>
+    <string name="notification_downloading_title">Downloading: %1$s</string>
+    <string name="notification_queued_count">%1$d queued</string>
+    <string name="notification_permission_denied">Notifications are off. The download will continue, but progress may not be visible outside Preload.</string>
     <string name="video_only_unavailable">This quality requires audio merging, which is not available yet.</string>
     <string name="privacy_message">No ads. No tracking.</string>
     <string name="nav_home">Home</string>
