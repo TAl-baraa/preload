@@ -1,6 +1,8 @@
 package com.preload.app
 
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,11 +14,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -24,6 +29,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -136,31 +142,40 @@ private fun DownloadsScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
+            .padding(horizontal = 16.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(stringResource(R.string.downloads_title), style = MaterialTheme.typography.headlineMedium)
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+        Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = null,
-                    modifier = Modifier.size(40.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    stringResource(R.string.no_downloads_title),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Text(
-                    stringResource(R.string.no_downloads_message),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(36.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        stringResource(R.string.no_downloads_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(R.string.no_downloads_message),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
@@ -171,6 +186,8 @@ private fun SettingsScreen(
     themePreference: ThemePreference,
     onThemePreferenceChanged: (ThemePreference) -> Unit,
 ) {
+    var showThemeDialog by rememberSaveable { mutableStateOf(false) }
+    var showLanguageDialog by rememberSaveable { mutableStateOf(false) }
     val configuredLanguage = remember(AppCompatDelegate.getApplicationLocales().toLanguageTags()) {
         val language = AppCompatDelegate.getApplicationLocales().get(0)?.language
         when (language) {
@@ -183,74 +200,128 @@ private fun SettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
+            .padding(horizontal = 16.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineMedium)
         PreferenceSection(
             title = stringResource(R.string.appearance_section),
             label = stringResource(R.string.theme_setting),
-        ) {
-            PreferenceRadioRow(
-                label = stringResource(R.string.preference_system),
-                selected = themePreference == ThemePreference.System,
-                onClick = { onThemePreferenceChanged(ThemePreference.System) },
-            )
-            PreferenceRadioRow(
-                label = stringResource(R.string.theme_light),
-                selected = themePreference == ThemePreference.Light,
-                onClick = { onThemePreferenceChanged(ThemePreference.Light) },
-            )
-            PreferenceRadioRow(
-                label = stringResource(R.string.theme_dark),
-                selected = themePreference == ThemePreference.Dark,
-                onClick = { onThemePreferenceChanged(ThemePreference.Dark) },
-            )
-        }
+            value = themePreference.label(),
+            onClick = { showThemeDialog = true },
+        )
         PreferenceSection(
             title = stringResource(R.string.language_section),
             label = stringResource(R.string.language_setting),
-        ) {
-            LanguagePreference.entries.forEach { preference ->
-                val label = when (preference) {
-                    LanguagePreference.System -> stringResource(R.string.preference_system)
-                    LanguagePreference.English -> stringResource(R.string.language_english)
-                    LanguagePreference.Arabic -> stringResource(R.string.language_arabic)
-                }
-                PreferenceRadioRow(
-                    label = label,
-                    selected = configuredLanguage == preference,
-                    onClick = {
-                        AppCompatDelegate.setApplicationLocales(
-                            LocaleListCompat.forLanguageTags(preference.languageTag),
-                        )
-                    },
-                )
-            }
-        }
+            value = configuredLanguage.label(),
+            onClick = { showLanguageDialog = true },
+        )
     }
+
+    if (showThemeDialog) {
+        PreferenceDialog(
+            title = stringResource(R.string.theme_setting),
+            options = ThemePreference.entries.map { it to it.label() },
+            selected = themePreference,
+            onSelected = {
+                onThemePreferenceChanged(it)
+                showThemeDialog = false
+            },
+            onDismiss = { showThemeDialog = false },
+        )
+    }
+
+    if (showLanguageDialog) {
+        PreferenceDialog(
+            title = stringResource(R.string.language_setting),
+            options = LanguagePreference.entries.map { it to it.label() },
+            selected = configuredLanguage,
+            onSelected = {
+                showLanguageDialog = false
+                AppCompatDelegate.setApplicationLocales(
+                    LocaleListCompat.forLanguageTags(it.languageTag),
+                )
+            },
+            onDismiss = { showLanguageDialog = false },
+        )
+    }
+}
+
+@Composable
+private fun ThemePreference.label(): String = when (this) {
+    ThemePreference.System -> stringResource(R.string.preference_system)
+    ThemePreference.Light -> stringResource(R.string.theme_light)
+    ThemePreference.Dark -> stringResource(R.string.theme_dark)
+}
+
+@Composable
+private fun LanguagePreference.label(): String = when (this) {
+    LanguagePreference.System -> stringResource(R.string.preference_system)
+    LanguagePreference.English -> stringResource(R.string.language_english)
+    LanguagePreference.Arabic -> stringResource(R.string.language_arabic)
+}
+
+@Composable
+private fun <T> PreferenceDialog(
+    title: String,
+    options: List<Pair<T, String>>,
+    selected: T,
+    onSelected: (T) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                options.forEach { (option, label) ->
+                    PreferenceRadioRow(
+                        label = label,
+                        selected = option == selected,
+                        onClick = { onSelected(option) },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
 }
 
 @Composable
 private fun PreferenceSection(
     title: String,
     label: String,
-    content: @Composable () -> Unit,
+    value: String,
+    onClick: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             text = title,
-            style = MaterialTheme.typography.titleSmall,
+            style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
         )
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(vertical = 8.dp)) {
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            ),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(text = label, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    text = label,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    text = value,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                content()
             }
         }
     }
