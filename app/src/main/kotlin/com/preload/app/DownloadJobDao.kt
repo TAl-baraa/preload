@@ -89,6 +89,21 @@ interface DownloadJobDao {
     )
     suspend fun resetStaleDownloading(): Int
 
+    @Query(
+        "UPDATE download_jobs SET status = 'QUEUED', progressPercent = NULL, " +
+            "downloadedBytes = NULL, totalBytes = estimatedBytes, bytesPerSecond = NULL, " +
+            "etaSeconds = NULL, outputUri = NULL, outputFileName = NULL, errorMessage = NULL, " +
+            "startedAt = NULL, completedAt = NULL " +
+            "WHERE id = :id AND status IN ('FAILED', 'CANCELLED')",
+    )
+    suspend fun retryTerminal(id: String): Int
+
+    @Query(
+        "DELETE FROM download_jobs WHERE id = :id " +
+            "AND status IN ('COMPLETED', 'FAILED', 'CANCELLED')",
+    )
+    suspend fun deleteTerminal(id: String): Int
+
     @Delete
     suspend fun delete(job: DownloadJob)
 }

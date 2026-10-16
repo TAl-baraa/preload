@@ -119,6 +119,14 @@ class DownloadQueueManager(
         return dao.cancelQueued(jobId, now()) > 0
     }
 
+    suspend fun retry(jobId: String): Boolean {
+        val retried = dao.retryTerminal(jobId) > 0
+        if (retried) scope.launch { processQueue() }
+        return retried
+    }
+
+    suspend fun removeFromHistory(jobId: String): Boolean = dao.deleteTerminal(jobId) > 0
+
     private suspend fun processQueue() = processingMutex.withLock {
         while (true) {
             val job = dao.getNextQueued() ?: return@withLock

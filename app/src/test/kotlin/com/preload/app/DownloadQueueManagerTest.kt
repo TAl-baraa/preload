@@ -86,6 +86,46 @@ class DownloadQueueManagerTest {
         scope.cancel()
     }
 
+    @Test
+    fun retryTerminalJobResetsItAndRunsThroughQueue() = runBlocking {
+        val failed = job("retry", 1L, DownloadStatus.FAILED).copy(
+            progressPercent = 42f,
+            downloadedBytes = 42L,
+            errorMessage = "network",
+            completedAt = 9L,
+        )
+        val dao = FakeDownloadJobDao(listOf(failed))
+        val executor = FakeExecutor()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val manager = DownloadQueueManager(dao, executor, scope, { 70L }) { _, _ -> }
+
+        assertTrue(manager.retry("retry"))
+        await { dao.job("retry")?.status == DownloadStatus.COMPLETED }
+
+        val retried = dao.job("retry")!!
+        assertEquals(null, retried.errorMessage)
+        assertEquals(listOf("retry"), executor.startedIds)
+        scope.cancel()
+    }
+
+    @Test
+    fun removeHistoryOnlyDeletesDatabaseRecord() = runBlocking {
+        val completed = job("completed", 1L, DownloadStatus.COMPLETED).copy(
+            outputUri = "content://media/completed",
+            outputFileName = "completed.mp4",
+        )
+        val dao = FakeDownloadJobDao(listOf(completed))
+        val executor = FakeExecutor()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val manager = DownloadQueueManager(dao, executor, scope, { 80L }) { _, _ -> }
+
+        assertTrue(manager.removeFromHistory("completed"))
+
+        assertEquals(null, dao.job("completed"))
+        assertTrue(executor.startedIds.isEmpty())
+        scope.cancel()
+    }
+
     private suspend fun await(condition: () -> Boolean) {
         withTimeout(3_000L) {
             while (!condition()) delay(10L)
@@ -250,6 +290,39 @@ private class FakeDownloadJobDao(initial: List<DownloadJob>) : DownloadJobDao {
         } }
         resetCount += count
         return count
+    }
+
+    override suspend fun retryTerminal(id: String): Int {
+        if (job(id)?.status !in setOf(DownloadStatus.FAILED, DownloadStatus.CANCELLED)) return 0
+        mutate { list ->
+            list.replace(id) {
+                it.copy(
+                    status = DownloadStatus.QUEUED,
+                    progressPercent = null,
+                    downloadedBytes = null,
+                    totalBytes = it.estimatedBytes,
+                    bytesPerSecond = null,
+                    etaSeconds = null,
+                    outputUri = null,
+                    outputFileName = null,
+                    errorMessage = null,
+                    startedAt = null,
+                    completedAt = null,
+                )
+            }
+        }
+        return 1
+    }
+
+    override suspend fun deleteTerminal(id: String): Int {
+        if (job(id)?.status !in setOf(
+                DownloadStatus.COMPLETED,
+                DownloadStatus.FAILED,
+                DownloadStatus.CANCELLED,
+            )
+        ) return 0
+        mutate { it.removeAll { item -> item.id == id } }
+        return 1
     }
 
     override suspend fun delete(job: DownloadJob) = mutate { it.removeAll { item -> item.id == job.id } }

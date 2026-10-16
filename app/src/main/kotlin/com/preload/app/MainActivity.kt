@@ -1,10 +1,12 @@
 package com.preload.app
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -115,6 +117,13 @@ class MainActivity : AppCompatActivity() {
                     onCancelDownload = { jobId ->
                         lifecycleScope.launch { downloadQueue.cancel(jobId) }
                     },
+                    onRetryDownload = { jobId ->
+                        lifecycleScope.launch { downloadQueue.retry(jobId) }
+                    },
+                    onRemoveDownload = { jobId ->
+                        lifecycleScope.launch { downloadQueue.removeFromHistory(jobId) }
+                    },
+                    onOpenDownload = ::openDownload,
                     onThemePreferenceChanged = { preference ->
                         lifecycleScope.launch { appPreferences.setTheme(preference) }
                     },
@@ -141,6 +150,34 @@ class MainActivity : AppCompatActivity() {
 
         val sharedText = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: return
         url = URL_PATTERN.find(sharedText)?.value ?: sharedText
+    }
+
+    private fun openDownload(job: DownloadJob): OpenDownloadResult {
+        val uri = job.outputUri?.let(Uri::parse) ?: return OpenDownloadResult.Missing
+        val exists = try {
+            contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
+        } catch (_: Exception) {
+            false
+        }
+        if (!exists) return OpenDownloadResult.Missing
+
+        val mimeType = job.mimeType ?: when (job.mediaKind) {
+            DownloadMediaKind.VIDEO_AUDIO -> "video/*"
+            DownloadMediaKind.AUDIO -> "audio/*"
+        }
+        return try {
+            startActivity(
+                Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, mimeType)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                },
+            )
+            OpenDownloadResult.Opened
+        } catch (_: ActivityNotFoundException) {
+            OpenDownloadResult.NoHandler
+        } catch (_: SecurityException) {
+            OpenDownloadResult.Missing
+        }
     }
 
     private companion object {
